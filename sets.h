@@ -1,3 +1,6 @@
+#ifndef SETS_H
+#define SETS_H
+
 #include <utility>
 
 template <typename T>
@@ -26,3 +29,5 @@ T Difference(T&& left, T&& right) {
     }
     return std::move(left);
 }
+
+#endif

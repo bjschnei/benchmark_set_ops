@@ -110,17 +110,15 @@ absl::StatusOr<std::pair<roaring::Roaring, roaring::Roaring>> GetRoaringSets() {
 }
 
 template <typename T, typename U>
-void BenchmarkUnorderedSetHelper(benchmark::State& state, T set_getter, U op) {
+void BenchmarkSetHelper(benchmark::State& state, T set_getter, U op) {
     auto sets = set_getter();
     ASSERT_TRUE(sets.ok());
-    auto [left, right] = *sets;
     for (auto _ : state) {
         state.PauseTiming();
-        auto left_copy = left;
-        auto right_copy = right;
+        auto [left, right] = *sets;
         state.ResumeTiming();
-        benchmark::DoNotOptimize(
-            op(std::move(left_copy), std::move(right_copy)));
+        auto result = op(std::move(left), std::move(right));
+        benchmark::DoNotOptimize(result);
     }
 }
 
@@ -166,36 +164,117 @@ class UnorderedStringSet {
     }
 };
 
+class BitSet {
+   public:
+    absl::StatusOr<
+        std::pair<std::bitset<kNumSetElems>, std::bitset<kNumSetElems>>>
+    operator()() {
+        auto sets = GetPairOfSetMembers(1);
+        if (!sets.ok()) {
+            return sets.status();
+        }
+        auto [left, right] = std::move(*sets);
+        std::bitset<kNumSetElems> left_set;
+        for (auto v : left) {
+            left_set.set(v);
+        }
+        std::bitset<kNumSetElems> right_set;
+        for (auto v : right) {
+            right_set.set(v);
+        }
+        return std::make_pair(std::move(left_set), std::move(right_set));
+    }
+};
+
+class RoaringBitSet {
+   public:
+    absl::StatusOr<std::pair<roaring::Roaring, roaring::Roaring>> operator()() {
+        auto sets = GetPairOfSetMembers(1);
+        if (!sets.ok()) {
+            return sets.status();
+        }
+        auto [left, right] = std::move(*sets);
+        roaring::Roaring left_set;
+        for (auto v : left) {
+            left_set.add(v);
+        }
+        roaring::Roaring right_set;
+        for (auto v : right) {
+            right_set.add(v);
+        }
+        left_set.runOptimize();
+        right_set.runOptimize();
+        return std::make_pair(std::move(left_set), std::move(right_set));
+    }
+};
+
+template <typename T>
+class Op {
+   public:
+    typedef std::tuple_element<
+        0, typename std::invoke_result_t<T>::value_type>::type value_type;
+};
+
 template <typename T>
 class UnionOp {
    public:
-    using U =
-        std::tuple_element<0,
-                           typename std::invoke_result_t<T>::value_type>::type;
-    U operator()(U&& left, U&& right) {
+    Op<T>::value_type operator()(Op<T>::value_type&& left,
+                                 Op<T>::value_type&& right) {
         return Union(std::move(left), std::move(right));
+    }
+};
+
+template <typename T>
+class BitwiseUnionOp {
+   public:
+    Op<T>::value_type operator()(Op<T>::value_type&& left,
+                                 Op<T>::value_type&& right) {
+        return left | right;
     }
 };
 
 template <typename T>
 class IntersectionOp {
    public:
-    using U =
-        std::tuple_element<0,
-                           typename std::invoke_result_t<T>::value_type>::type;
-    U operator()(U&& left, U&& right) {
+    Op<T>::value_type operator()(Op<T>::value_type&& left,
+                                 Op<T>::value_type&& right) {
         return Intersection(std::move(left), std::move(right));
+    }
+};
+
+template <typename T>
+class BitwiseIntersectionOp {
+   public:
+    Op<T>::value_type operator()(Op<T>::value_type&& left,
+                                 Op<T>::value_type&& right) {
+        return left & right;
     }
 };
 
 template <typename T>
 class DifferenceOp {
    public:
-    using U =
-        std::tuple_element<0,
-                           typename std::invoke_result_t<T>::value_type>::type;
-    U operator()(U&& left, U&& right) {
+    Op<T>::value_type operator()(Op<T>::value_type&& left,
+                                 Op<T>::value_type&& right) {
         return Difference(std::move(left), std::move(right));
+    }
+};
+
+template <typename T>
+class BitwiseDifferenceOp {
+   public:
+    Op<T>::value_type operator()(Op<T>::value_type&& left,
+                                 Op<T>::value_type&& right) {
+        return (left & (~right));
+    }
+};
+
+template <typename T>
+class RoaringBitwiseDifferenceOp {
+   public:
+    Op<T>::value_type operator()(Op<T>::value_type&& left,
+                                 Op<T>::value_type&& right) {
+        return (left - right);
     }
 };
 
@@ -209,93 +288,67 @@ class SetOpFixture : public benchmark::Fixture {
 // Unordered set of integers
 BENCHMARK_TEMPLATE_F(SetOpFixture, IntTestUnion, UnorderedIntSet,
                      UnionOp<UnorderedIntSet>)
-(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
 BENCHMARK_TEMPLATE_F(SetOpFixture, IntTestIntersection, UnorderedIntSet,
                      IntersectionOp<UnorderedIntSet>)
-(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
 BENCHMARK_TEMPLATE_F(SetOpFixture, IntTestDifference, UnorderedIntSet,
                      DifferenceOp<UnorderedIntSet>)
-(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
 // Unordered set of bytes
 BENCHMARK_TEMPLATE_F(SetOpFixture, ByteTestUnion, UnorderedByteSet,
                      UnionOp<UnorderedByteSet>)
-(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
 BENCHMARK_TEMPLATE_F(SetOpFixture, ByteTestIntersection, UnorderedByteSet,
                      IntersectionOp<UnorderedByteSet>)
-(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
 BENCHMARK_TEMPLATE_F(SetOpFixture, ByteTestDifference, UnorderedByteSet,
                      DifferenceOp<UnorderedByteSet>)
-(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
 // Unordered set of strings
 BENCHMARK_TEMPLATE_F(SetOpFixture, StringTestUnion, UnorderedStringSet,
                      UnionOp<UnorderedStringSet>)
-(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
 BENCHMARK_TEMPLATE_F(SetOpFixture, StringTestIntersection, UnorderedStringSet,
                      IntersectionOp<UnorderedStringSet>)
-(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
 BENCHMARK_TEMPLATE_F(SetOpFixture, StringTestDifference, UnorderedStringSet,
                      DifferenceOp<UnorderedStringSet>)
-(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
-static void BM_UnorderedBitSetUnionAll(benchmark::State& state) {
-    auto sets = GetUnorderedBitSets();
-    ASSERT_TRUE(sets.ok());
-    auto [left, right] = *sets;
-    for (auto _ : state) {
-        benchmark::DoNotOptimize(left | right);
-    }
-}
+// std::bitset implementation
+BENCHMARK_TEMPLATE_F(SetOpFixture, StdBitSetTestUnion, BitSet,
+                     BitwiseUnionOp<BitSet>)
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
-static void BM_RoaringSetUnionAll(benchmark::State& state) {
-    auto sets = GetUnorderedBitSets();
-    ASSERT_TRUE(sets.ok());
-    auto [left, right] = *sets;
-    for (auto _ : state) {
-        benchmark::DoNotOptimize(left | right);
-    }
-}
+BENCHMARK_TEMPLATE_F(SetOpFixture, StdBitSetTestIntersection, BitSet,
+                     BitwiseIntersectionOp<BitSet>)
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
-static void BM_RoaringSetIntersectionAll(benchmark::State& state) {
-    auto sets = GetUnorderedBitSets();
-    ASSERT_TRUE(sets.ok());
-    auto [left, right] = *sets;
-    for (auto _ : state) {
-        benchmark::DoNotOptimize(left & right);
-    }
-}
+BENCHMARK_TEMPLATE_F(SetOpFixture, StdBitSetTestDifference, BitSet,
+                     BitwiseDifferenceOp<BitSet>)
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
-static void BM_UnorderedBitSetDifferenceAll(benchmark::State& state) {
-    auto sets = GetUnorderedBitSets();
-    ASSERT_TRUE(sets.ok());
-    auto [left, right] = *sets;
-    for (auto _ : state) {
-        benchmark::DoNotOptimize(left & (~right));
-    }
-}
+// Roaring bitset implementation
+BENCHMARK_TEMPLATE_F(SetOpFixture, RoaringBitSetTestUnion, RoaringBitSet,
+                     BitwiseUnionOp<RoaringBitSet>)
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
-static void BM_RoaringSetDifferenceAll(benchmark::State& state) {
-    auto sets = GetRoaringSets();
-    ASSERT_TRUE(sets.ok());
-    auto [left, right] = *sets;
-    for (auto _ : state) {
-        benchmark::DoNotOptimize(left - right);
-    }
-}
+BENCHMARK_TEMPLATE_F(SetOpFixture, RoaringBitSetTestIntersection, RoaringBitSet,
+                     BitwiseIntersectionOp<RoaringBitSet>)
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
-// Register the function as a benchmark
-BENCHMARK(BM_UnorderedBitSetUnionAll);
-BENCHMARK(BM_RoaringSetUnionAll);
-BENCHMARK(BM_RoaringSetIntersectionAll);
-BENCHMARK(BM_UnorderedBitSetDifferenceAll);
-BENCHMARK(BM_RoaringSetDifferenceAll);
+BENCHMARK_TEMPLATE_F(SetOpFixture, RoaringBitSetTestDifference, RoaringBitSet,
+                     RoaringBitwiseDifferenceOp<RoaringBitSet>)
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 
 // Run the benchmark
 BENCHMARK_MAIN();
