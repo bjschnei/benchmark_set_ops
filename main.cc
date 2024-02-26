@@ -71,6 +71,7 @@ GetUnorderedStringSetsHelper(
     return std::make_pair(std::move(left_set), std::move(right_set));
 }
 
+// Template used to run benchmarks for all set types and operations.
 template <typename T, typename U>
 void BenchmarkSetHelper(benchmark::State& state, const T& set_getter,
                         const U& op) {
@@ -256,6 +257,7 @@ class RoaringBitwiseDifferenceOp {
     }
 };
 
+// Fixture that sets the probablity based on the test parameter.
 template <typename T, typename U>
 class SetOpFixture : public benchmark::Fixture {
    public:
