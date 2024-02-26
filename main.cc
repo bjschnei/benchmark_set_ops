@@ -122,6 +122,27 @@ GetUnorderedBitSets() {
     return std::make_pair(std::move(left_set), std::move(right_set));
 }
 
+absl::StatusOr<std::pair<roaring::Roaring, roaring::Roaring>>
+GetRoaringSets() {
+    auto sets = GetPairOfSetMembers(1);
+    if (!sets.ok()) {
+        return sets.status();
+    }
+    auto [left, right] = std::move(*sets);
+    roaring::Roaring left_set;
+    for (auto v : left) {
+        left_set.add(v);
+    }
+    roaring::Roaring right_set;
+    for (auto v : right) {
+        right_set.add(v);
+    }
+    left_set.runOptimize();
+    right_set.runOptimize();
+    return std::make_pair(std::move(left_set), std::move(right_set));
+}
+
+
 template <typename T, typename U>
 void BenchmarkUnorderedSetHelper(benchmark::State& state, T set_getter, U op) {
     auto sets = set_getter();
@@ -164,6 +185,15 @@ static void BM_UnorderedBitSetUnionAll(benchmark::State& state) {
     }
 }
 
+static void BM_RoaringSetUnionAll(benchmark::State& state) {
+    auto sets = GetUnorderedBitSets();
+    ASSERT_TRUE(sets.ok());
+    auto [left, right] = *sets;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(left | right);
+    }
+}
+
 static void BM_UnorderedIntSetIntersectionAll(benchmark::State& state) {
     BenchmarkUnorderedSetHelper(
         state, GetUnorderedIntSets, [](auto&& a, auto&& b) {
@@ -177,6 +207,16 @@ static void BM_UnorderedByteSetIntersectionAll(benchmark::State& state) {
             return Intersection(std::move(a), std::move(b));
         });
 }
+
+static void BM_RoaringSetIntersectionAll(benchmark::State& state) {
+    auto sets = GetUnorderedBitSets();
+    ASSERT_TRUE(sets.ok());
+    auto [left, right] = *sets;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(left & right);
+    }
+}
+
 
 static void BM_UnorderedIntSetDifferenceAll(benchmark::State& state) {
     BenchmarkUnorderedSetHelper(
@@ -208,17 +248,29 @@ static void BM_UnorderedBitSetDifferenceAll(benchmark::State& state) {
     }
 }
 
+static void BM_RoaringSetDifferenceAll(benchmark::State& state) {
+    auto sets = GetRoaringSets();
+    ASSERT_TRUE(sets.ok());
+    auto [left, right] = *sets;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(left - right);
+    }
+}
+
 // Register the function as a benchmark
 BENCHMARK(BM_UnorderedIntSetUnionAll);
 BENCHMARK(BM_UnorderedByteSetUnionAll);
 BENCHMARK(BM_UnorderedStringSetUnionAll);
 BENCHMARK(BM_UnorderedBitSetUnionAll);
+BENCHMARK(BM_RoaringSetUnionAll);
 BENCHMARK(BM_UnorderedIntSetIntersectionAll);
 BENCHMARK(BM_UnorderedByteSetIntersectionAll);
+BENCHMARK(BM_RoaringSetIntersectionAll);
 BENCHMARK(BM_UnorderedIntSetDifferenceAll);
 BENCHMARK(BM_UnorderedByteSetDifferenceAll);
 BENCHMARK(BM_UnorderedStringSetDifferenceAll);
 BENCHMARK(BM_UnorderedBitSetDifferenceAll);
+BENCHMARK(BM_RoaringSetDifferenceAll);
 
 // Run the benchmark
 BENCHMARK_MAIN();
