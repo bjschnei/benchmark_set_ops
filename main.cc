@@ -72,8 +72,8 @@ GetUnorderedStringSetsHelper(
 }
 
 template <typename T, typename U>
-void BenchmarkSetHelper(benchmark::State& state, T set_getter, U op) {
-    set_getter.SetProbabilityPercent(state.range(0));
+void BenchmarkSetHelper(benchmark::State& state, const T& set_getter,
+                        const U& op) {
     auto sets = set_getter();
     ASSERT_TRUE(sets.ok());
     for (auto _ : state) {
@@ -101,7 +101,7 @@ class UnorderedIntSet : public BaseGetter {
    public:
     absl::StatusOr<
         std::pair<std::unordered_set<uint32_t>, std::unordered_set<uint32_t>>>
-    operator()() {
+    operator()() const {
         auto sets = GetPairOfSetMembers(GetProbability());
         if (!sets.ok()) {
             return sets.status();
@@ -119,7 +119,7 @@ class UnorderedByteSet : public BaseGetter {
    public:
     absl::StatusOr<std::pair<std::unordered_set<std::string>,
                              std::unordered_set<std::string>>>
-    operator()() {
+    operator()() const {
         return GetUnorderedStringSetsHelper(
             [](uint32_t val) {
                 return std::string(reinterpret_cast<const char*>(&val),
@@ -135,7 +135,7 @@ class UnorderedStringSet : public BaseGetter {
    public:
     absl::StatusOr<std::pair<std::unordered_set<std::string>,
                              std::unordered_set<std::string>>>
-    operator()() {
+    operator()() const {
         return GetUnorderedStringSetsHelper(
             [](uint32_t val) { return std::to_string(val); }, GetProbability());
     }
@@ -145,7 +145,7 @@ class BitSet : public BaseGetter {
    public:
     absl::StatusOr<
         std::pair<std::bitset<kNumSetElems>, std::bitset<kNumSetElems>>>
-    operator()() {
+    operator()() const {
         auto sets = GetPairOfSetMembers(GetProbability());
         if (!sets.ok()) {
             return sets.status();
@@ -165,7 +165,8 @@ class BitSet : public BaseGetter {
 
 class RoaringBitSet : public BaseGetter {
    public:
-    absl::StatusOr<std::pair<roaring::Roaring, roaring::Roaring>> operator()() {
+    absl::StatusOr<std::pair<roaring::Roaring, roaring::Roaring>> operator()()
+        const {
         auto sets = GetPairOfSetMembers(GetProbability());
         if (!sets.ok()) {
             return sets.status();
@@ -196,7 +197,7 @@ template <typename T>
 class UnionOp {
    public:
     Op<T>::value_type operator()(Op<T>::value_type&& left,
-                                 Op<T>::value_type&& right) {
+                                 Op<T>::value_type&& right) const {
         return Union(std::move(left), std::move(right));
     }
 };
@@ -205,7 +206,7 @@ template <typename T>
 class BitwiseUnionOp {
    public:
     Op<T>::value_type operator()(Op<T>::value_type&& left,
-                                 Op<T>::value_type&& right) {
+                                 Op<T>::value_type&& right) const {
         return left | right;
     }
 };
@@ -214,7 +215,7 @@ template <typename T>
 class IntersectionOp {
    public:
     Op<T>::value_type operator()(Op<T>::value_type&& left,
-                                 Op<T>::value_type&& right) {
+                                 Op<T>::value_type&& right) const {
         return Intersection(std::move(left), std::move(right));
     }
 };
@@ -223,7 +224,7 @@ template <typename T>
 class BitwiseIntersectionOp {
    public:
     Op<T>::value_type operator()(Op<T>::value_type&& left,
-                                 Op<T>::value_type&& right) {
+                                 Op<T>::value_type&& right) const {
         return left & right;
     }
 };
@@ -232,7 +233,7 @@ template <typename T>
 class DifferenceOp {
    public:
     Op<T>::value_type operator()(Op<T>::value_type&& left,
-                                 Op<T>::value_type&& right) {
+                                 Op<T>::value_type&& right) const {
         return Difference(std::move(left), std::move(right));
     }
 };
@@ -241,7 +242,7 @@ template <typename T>
 class BitwiseDifferenceOp {
    public:
     Op<T>::value_type operator()(Op<T>::value_type&& left,
-                                 Op<T>::value_type&& right) {
+                                 Op<T>::value_type&& right) const {
         return (left & (~right));
     }
 };
@@ -250,7 +251,7 @@ template <typename T>
 class RoaringBitwiseDifferenceOp {
    public:
     Op<T>::value_type operator()(Op<T>::value_type&& left,
-                                 Op<T>::value_type&& right) {
+                                 Op<T>::value_type&& right) const {
         return (left - right);
     }
 };
@@ -258,7 +259,9 @@ class RoaringBitwiseDifferenceOp {
 template <typename T, typename U>
 class SetOpFixture : public benchmark::Fixture {
    public:
-    void SetUp(::benchmark::State& state) {}
+    void SetUp(::benchmark::State& state) {
+        getter_.SetProbabilityPercent(state.range(0));
+    }
 
    protected:
     T getter_;
