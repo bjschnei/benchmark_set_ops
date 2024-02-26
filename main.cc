@@ -50,19 +50,6 @@ GetPairOfSetMembers(double probability) {
     return std::make_pair(std::move(*left), std::move(*right));
 }
 
-absl::StatusOr<
-    std::pair<std::unordered_set<uint32_t>, std::unordered_set<uint32_t>>>
-GetUnorderedIntSets() {
-    auto sets = GetPairOfSetMembers(1);
-    if (!sets.ok()) {
-        return sets.status();
-    }
-    auto [left, right] = std::move(*sets);
-    std::unordered_set<uint32_t> left_set(left.begin(), left.end());
-    std::unordered_set<uint32_t> right_set(right.begin(), right.end());
-    return std::make_pair(std::move(left_set), std::move(right_set));
-}
-
 // The bytes of an integer representation of the value in a string.
 // The length of the byte array is the sizeof each set member.
 absl::StatusOr<
@@ -85,25 +72,6 @@ GetUnorderedStringSetsHelper(
     return std::make_pair(std::move(left_set), std::move(right_set));
 }
 
-// The bytes of an integer representation of the value in a string.
-// The length of the byte array is the sizeof each set member.
-absl::StatusOr<
-    std::pair<std::unordered_set<std::string>, std::unordered_set<std::string>>>
-GetUnorderedByteSets() {
-    return GetUnorderedStringSetsHelper([](uint32_t val) {
-        return std::string(reinterpret_cast<const char*>(&val), sizeof(val));
-    });
-}
-
-// The integer represented as a string.
-// Demonstrates the implications of a longer string value.
-absl::StatusOr<
-    std::pair<std::unordered_set<std::string>, std::unordered_set<std::string>>>
-GetUnorderedStringSets() {
-    return GetUnorderedStringSetsHelper(
-        [](uint32_t val) { return std::to_string(val); });
-}
-
 absl::StatusOr<std::pair<std::bitset<kNumSetElems>, std::bitset<kNumSetElems>>>
 GetUnorderedBitSets() {
     auto sets = GetPairOfSetMembers(1);
@@ -122,8 +90,7 @@ GetUnorderedBitSets() {
     return std::make_pair(std::move(left_set), std::move(right_set));
 }
 
-absl::StatusOr<std::pair<roaring::Roaring, roaring::Roaring>>
-GetRoaringSets() {
+absl::StatusOr<std::pair<roaring::Roaring, roaring::Roaring>> GetRoaringSets() {
     auto sets = GetPairOfSetMembers(1);
     if (!sets.ok()) {
         return sets.status();
@@ -142,7 +109,6 @@ GetRoaringSets() {
     return std::make_pair(std::move(left_set), std::move(right_set));
 }
 
-
 template <typename T, typename U>
 void BenchmarkUnorderedSetHelper(benchmark::State& state, T set_getter, U op) {
     auto sets = set_getter();
@@ -158,23 +124,126 @@ void BenchmarkUnorderedSetHelper(benchmark::State& state, T set_getter, U op) {
     }
 }
 
-static void BM_UnorderedIntSetUnionAll(benchmark::State& state) {
-    BenchmarkUnorderedSetHelper(
-        state, GetUnorderedIntSets,
-        [](auto&& a, auto&& b) { return Union(std::move(a), std::move(b)); });
-}
+class UnorderedIntSet {
+   public:
+    absl::StatusOr<
+        std::pair<std::unordered_set<uint32_t>, std::unordered_set<uint32_t>>>
+    operator()() {
+        auto sets = GetPairOfSetMembers(1);
+        if (!sets.ok()) {
+            return sets.status();
+        }
+        auto [left, right] = std::move(*sets);
+        std::unordered_set<uint32_t> left_set(left.begin(), left.end());
+        std::unordered_set<uint32_t> right_set(right.begin(), right.end());
+        return std::make_pair(std::move(left_set), std::move(right_set));
+    }
+};
 
-static void BM_UnorderedByteSetUnionAll(benchmark::State& state) {
-    BenchmarkUnorderedSetHelper(
-        state, GetUnorderedByteSets,
-        [](auto&& a, auto&& b) { return Union(std::move(a), std::move(b)); });
-}
+// The bytes of an integer representation of the value in a string.
+// The length of the byte array is the sizeof each set member.
+class UnorderedByteSet {
+   public:
+    absl::StatusOr<std::pair<std::unordered_set<std::string>,
+                             std::unordered_set<std::string>>>
+    operator()() {
+        return GetUnorderedStringSetsHelper([](uint32_t val) {
+            return std::string(reinterpret_cast<const char*>(&val),
+                               sizeof(val));
+        });
+    }
+};
 
-static void BM_UnorderedStringSetUnionAll(benchmark::State& state) {
-    BenchmarkUnorderedSetHelper(
-        state, GetUnorderedStringSets,
-        [](auto&& a, auto&& b) { return Union(std::move(a), std::move(b)); });
-}
+// The integer represented as a string.
+// Demonstrates the implications of a longer string value.
+class UnorderedStringSet {
+   public:
+    absl::StatusOr<std::pair<std::unordered_set<std::string>,
+                             std::unordered_set<std::string>>>
+    operator()() {
+        return GetUnorderedStringSetsHelper(
+            [](uint32_t val) { return std::to_string(val); });
+    }
+};
+
+template <typename T>
+class UnionOp {
+   public:
+    using U =
+        std::tuple_element<0,
+                           typename std::invoke_result_t<T>::value_type>::type;
+    U operator()(U&& left, U&& right) {
+        return Union(std::move(left), std::move(right));
+    }
+};
+
+template <typename T>
+class IntersectionOp {
+   public:
+    using U =
+        std::tuple_element<0,
+                           typename std::invoke_result_t<T>::value_type>::type;
+    U operator()(U&& left, U&& right) {
+        return Intersection(std::move(left), std::move(right));
+    }
+};
+
+template <typename T>
+class DifferenceOp {
+   public:
+    using U =
+        std::tuple_element<0,
+                           typename std::invoke_result_t<T>::value_type>::type;
+    U operator()(U&& left, U&& right) {
+        return Difference(std::move(left), std::move(right));
+    }
+};
+
+template <typename T, typename U>
+class SetOpFixture : public benchmark::Fixture {
+   protected:
+    T getter_;
+    U op_;
+};
+
+// Unordered set of integers
+BENCHMARK_TEMPLATE_F(SetOpFixture, IntTestUnion, UnorderedIntSet,
+                     UnionOp<UnorderedIntSet>)
+(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+
+BENCHMARK_TEMPLATE_F(SetOpFixture, IntTestIntersection, UnorderedIntSet,
+                     IntersectionOp<UnorderedIntSet>)
+(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+
+BENCHMARK_TEMPLATE_F(SetOpFixture, IntTestDifference, UnorderedIntSet,
+                     DifferenceOp<UnorderedIntSet>)
+(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+
+// Unordered set of bytes
+BENCHMARK_TEMPLATE_F(SetOpFixture, ByteTestUnion, UnorderedByteSet,
+                     UnionOp<UnorderedByteSet>)
+(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+
+BENCHMARK_TEMPLATE_F(SetOpFixture, ByteTestIntersection, UnorderedByteSet,
+                     IntersectionOp<UnorderedByteSet>)
+(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+
+BENCHMARK_TEMPLATE_F(SetOpFixture, ByteTestDifference, UnorderedByteSet,
+                     DifferenceOp<UnorderedByteSet>)
+(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+
+// Unordered set of strings
+BENCHMARK_TEMPLATE_F(SetOpFixture, StringTestUnion, UnorderedStringSet,
+                     UnionOp<UnorderedStringSet>)
+(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+
+BENCHMARK_TEMPLATE_F(SetOpFixture, StringTestIntersection, UnorderedStringSet,
+                     IntersectionOp<UnorderedStringSet>)
+(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
+
+BENCHMARK_TEMPLATE_F(SetOpFixture, StringTestDifference, UnorderedStringSet,
+                     DifferenceOp<UnorderedStringSet>)
+(benchmark::State& state) { BenchmarkUnorderedSetHelper(state, getter_, op_); }
 
 static void BM_UnorderedBitSetUnionAll(benchmark::State& state) {
     auto sets = GetUnorderedBitSets();
@@ -194,20 +263,6 @@ static void BM_RoaringSetUnionAll(benchmark::State& state) {
     }
 }
 
-static void BM_UnorderedIntSetIntersectionAll(benchmark::State& state) {
-    BenchmarkUnorderedSetHelper(
-        state, GetUnorderedIntSets, [](auto&& a, auto&& b) {
-            return Intersection(std::move(a), std::move(b));
-        });
-}
-
-static void BM_UnorderedByteSetIntersectionAll(benchmark::State& state) {
-    BenchmarkUnorderedSetHelper(
-        state, GetUnorderedByteSets, [](auto&& a, auto&& b) {
-            return Intersection(std::move(a), std::move(b));
-        });
-}
-
 static void BM_RoaringSetIntersectionAll(benchmark::State& state) {
     auto sets = GetUnorderedBitSets();
     ASSERT_TRUE(sets.ok());
@@ -215,28 +270,6 @@ static void BM_RoaringSetIntersectionAll(benchmark::State& state) {
     for (auto _ : state) {
         benchmark::DoNotOptimize(left & right);
     }
-}
-
-
-static void BM_UnorderedIntSetDifferenceAll(benchmark::State& state) {
-    BenchmarkUnorderedSetHelper(
-        state, GetUnorderedIntSets, [](auto&& a, auto&& b) {
-            return Difference(std::move(a), std::move(b));
-        });
-}
-
-static void BM_UnorderedByteSetDifferenceAll(benchmark::State& state) {
-    BenchmarkUnorderedSetHelper(
-        state, GetUnorderedByteSets, [](auto&& a, auto&& b) {
-            return Difference(std::move(a), std::move(b));
-        });
-}
-
-static void BM_UnorderedStringSetDifferenceAll(benchmark::State& state) {
-    BenchmarkUnorderedSetHelper(
-        state, GetUnorderedStringSets, [](auto&& a, auto&& b) {
-            return Difference(std::move(a), std::move(b));
-        });
 }
 
 static void BM_UnorderedBitSetDifferenceAll(benchmark::State& state) {
@@ -258,17 +291,9 @@ static void BM_RoaringSetDifferenceAll(benchmark::State& state) {
 }
 
 // Register the function as a benchmark
-BENCHMARK(BM_UnorderedIntSetUnionAll);
-BENCHMARK(BM_UnorderedByteSetUnionAll);
-BENCHMARK(BM_UnorderedStringSetUnionAll);
 BENCHMARK(BM_UnorderedBitSetUnionAll);
 BENCHMARK(BM_RoaringSetUnionAll);
-BENCHMARK(BM_UnorderedIntSetIntersectionAll);
-BENCHMARK(BM_UnorderedByteSetIntersectionAll);
 BENCHMARK(BM_RoaringSetIntersectionAll);
-BENCHMARK(BM_UnorderedIntSetDifferenceAll);
-BENCHMARK(BM_UnorderedByteSetDifferenceAll);
-BENCHMARK(BM_UnorderedStringSetDifferenceAll);
 BENCHMARK(BM_UnorderedBitSetDifferenceAll);
 BENCHMARK(BM_RoaringSetDifferenceAll);
 
