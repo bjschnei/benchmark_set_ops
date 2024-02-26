@@ -13,8 +13,6 @@ T Intersection(T&& left, T&& right) {
     auto& small = left.size() <= right.size() ? left : right;
     const auto& big = left.size() <= right.size() ? right : left;
     // Traverse the smaller set removing what is not in both.
-    //absl::erase_if(small,
-                   //[&big](const auto& elem) { return !big.contains(elem); });
     std::erase_if(small,
                   [&big](const auto& elem) { return !big.contains(elem); });
     return std::move(small);
