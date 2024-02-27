@@ -11,6 +11,7 @@
 #include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "bm.h"
 #include "gtest/gtest.h"
 #include "roaring/roaring.hh"
 #include "sets.h"
@@ -187,6 +188,30 @@ class RoaringBitSet : public BaseGetter {
     }
 };
 
+class BitmagicBitSet : public BaseGetter {
+   public:
+    absl::StatusOr<std::pair<bm::bvector<>, bm::bvector<>>> operator()() const {
+        auto sets = GetPairOfSetMembers(GetProbability());
+        if (!sets.ok()) {
+            return sets.status();
+        }
+        auto [left, right] = std::move(*sets);
+        bm::bvector<> left_set;
+        left_set.init();
+        for (auto v : left) {
+            left_set.set_bit(v);
+        }
+        bm::bvector<> right_set;
+        right_set.init();
+        for (auto v : right) {
+            right_set.set_bit(v);
+        }
+        left_set.optimize();
+        right_set.optimize();
+        return std::make_pair(std::move(left_set), std::move(right_set));
+    }
+};
+
 template <typename T>
 class Op {
    public:
@@ -359,6 +384,27 @@ BENCHMARK_TEMPLATE_DEFINE_F(SetOpFixture, RoaringBitSetTestDifference,
                             RoaringBitwiseDifferenceOp<RoaringBitSet>)
 (benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 BENCHMARK_REGISTER_F(SetOpFixture, RoaringBitSetTestDifference)
+    ->DenseRange(0, 100, 25);
+
+// bitmagic bitset implementation
+BENCHMARK_TEMPLATE_DEFINE_F(SetOpFixture, BitmagicBitSetTestUnion,
+                            BitmagicBitSet, BitwiseUnionOp<BitmagicBitSet>)
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
+BENCHMARK_REGISTER_F(SetOpFixture, BitmagicBitSetTestUnion)
+    ->DenseRange(0, 100, 25);
+
+BENCHMARK_TEMPLATE_DEFINE_F(SetOpFixture, BitmagicBitSetTestIntersection,
+                            BitmagicBitSet,
+                            BitwiseIntersectionOp<BitmagicBitSet>)
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
+BENCHMARK_REGISTER_F(SetOpFixture, BitmagicBitSetTestIntersection)
+    ->DenseRange(0, 100, 25);
+
+BENCHMARK_TEMPLATE_DEFINE_F(SetOpFixture, BitmagicBitSetTestDifference,
+                            BitmagicBitSet,
+                            RoaringBitwiseDifferenceOp<BitmagicBitSet>)
+(benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
+BENCHMARK_REGISTER_F(SetOpFixture, BitmagicBitSetTestDifference)
     ->DenseRange(0, 100, 25);
 
 // Run the benchmark

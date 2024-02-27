@@ -29,6 +29,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(absl)
 
+# BitMagic
+FetchContent_Declare(
+    bm
+    GIT_REPOSITORY "https://github.com/tlk00/BitMagic.git"
+)
+FetchContent_MakeAvailable(bm)
+include_directories(${bm_SOURCE_DIR}/src)
+
+
 # Benchmark
 set(BENCHMARK_DOWNLOAD_DEPENDENCIES ON)
 FetchContent_Declare(
@@ -43,4 +52,4 @@ add_executable(set_ops main.cc)
 target_link_libraries(set_ops 
     PUBLIC 
       sets
-      roaring absl::any_invocable absl::strings absl::status absl::statusor absl::random_random gtest benchmark::benchmark)
+      roaring absl::any_invocable absl::strings absl::status absl::statusor absl::random_random gtest benchmark::benchmark bm)
