@@ -17,7 +17,8 @@ include(FetchContent)
 FetchContent_Declare(
   roaring
   GIT_REPOSITORY "https://github.com/RoaringBitmap/CRoaring.git"
-  GIT_TAG v2.1.2)
+  GIT_TAG 3946d399a9a71e2fe890326b21ecbb45283ea3fe
+)
 FetchContent_MakeAvailable(roaring)
 set(CPP_ROARING_HEADERS ${roaring_SOURCE_DIR}/cpp/roaring64map.hh
                         ${roaring_SOURCE_DIR}/cpp/roaring.hh)
