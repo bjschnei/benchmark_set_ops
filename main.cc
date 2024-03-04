@@ -295,6 +295,84 @@ class SetOpFixture : public benchmark::Fixture {
     U op_;
 };
 
+// Fixture for iterating across a set and returning all set elements
+template <typename T>
+class GetSetElementsFixture : public benchmark::Fixture {
+   public:
+    void SetUp(::benchmark::State& state) {
+        getter_.SetProbabilityPercent(state.range(0));
+    }
+
+   protected:
+    T getter_;
+};
+
+void GetSetElements(benchmark::State& state,
+                    const UnorderedIntSet& set_getter) {
+    auto sets = set_getter();
+    ASSERT_TRUE(sets.ok());
+    const auto& set = sets->first;
+    for (auto _ : state) {
+        std::vector<uint32_t> result;
+        for (const auto& val : set) {
+            result.push_back(val);
+        }
+        benchmark::DoNotOptimize(result);
+    }
+}
+
+void GetSetElements(benchmark::State& state, const RoaringBitSet& set_getter) {
+    auto sets = set_getter();
+    ASSERT_TRUE(sets.ok());
+    const auto& set = sets->first;
+    for (auto _ : state) {
+        std::vector<uint32_t> result;
+        result.reserve(set.cardinality());
+        set.toUint32Array(result.data());
+        benchmark::DoNotOptimize(result);
+    }
+}
+
+void GetSetElements(benchmark::State& state, const BitmagicBitSet& set_getter) {
+    auto sets = set_getter();
+    ASSERT_TRUE(sets.ok());
+    const auto& set = sets->first;
+    for (auto _ : state) {
+        std::vector<uint32_t> result;
+        auto val = set.get_first();
+        if (val == 0) {
+            if (!set.get_bit(0)) {
+                continue;
+            }
+        }
+        result.push_back(val);
+        while (true) {
+            val = set.get_next(val);
+            if (!val) {
+                break;
+            }
+            result.push_back(val);
+        }
+        benchmark::DoNotOptimize(result);
+    }
+}
+
+void GetSetElements(benchmark::State& state, const BitSet& set_getter) {
+    auto sets = set_getter();
+    ASSERT_TRUE(sets.ok());
+    const auto& set = sets->first;
+    for (auto _ : state) {
+        std::vector<uint32_t> result;
+        for (auto i = 0; i < kNumSetElems; i++) {
+            if (set.test(i)) {
+                result.push_back(i);
+            }
+        }
+        benchmark::DoNotOptimize(result);
+    }
+}
+
+// Test how quickly we can do set operations.
 // Unordered set of integers
 BENCHMARK_TEMPLATE_DEFINE_F(SetOpFixture, IntTestUnion, UnorderedIntSet,
                             UnionOp<UnorderedIntSet>)
@@ -405,6 +483,30 @@ BENCHMARK_TEMPLATE_DEFINE_F(SetOpFixture, BitmagicBitSetTestDifference,
                             RoaringBitwiseDifferenceOp<BitmagicBitSet>)
 (benchmark::State& state) { BenchmarkSetHelper(state, getter_, op_); }
 BENCHMARK_REGISTER_F(SetOpFixture, BitmagicBitSetTestDifference)
+    ->DenseRange(0, 100, 25);
+
+// Test how quickly we can read the set bits into a vector of uint32
+BENCHMARK_TEMPLATE_DEFINE_F(GetSetElementsFixture, IntTestElems,
+                            UnorderedIntSet)
+(benchmark::State& state) { GetSetElements(state, getter_); }
+BENCHMARK_REGISTER_F(GetSetElementsFixture, IntTestElems)
+    ->DenseRange(0, 100, 25);
+
+BENCHMARK_TEMPLATE_DEFINE_F(GetSetElementsFixture, StdBitSetTestElems, BitSet)
+(benchmark::State& state) { GetSetElements(state, getter_); }
+BENCHMARK_REGISTER_F(GetSetElementsFixture, StdBitSetTestElems)
+    ->DenseRange(0, 100, 25);
+
+BENCHMARK_TEMPLATE_DEFINE_F(GetSetElementsFixture, RoaringTestElems,
+                            RoaringBitSet)
+(benchmark::State& state) { GetSetElements(state, getter_); }
+BENCHMARK_REGISTER_F(GetSetElementsFixture, RoaringTestElems)
+    ->DenseRange(0, 100, 25);
+
+BENCHMARK_TEMPLATE_DEFINE_F(GetSetElementsFixture, BitmagicTestElems,
+                            BitmagicBitSet)
+(benchmark::State& state) { GetSetElements(state, getter_); }
+BENCHMARK_REGISTER_F(GetSetElementsFixture, BitmagicTestElems)
     ->DenseRange(0, 100, 25);
 
 // Run the benchmark
